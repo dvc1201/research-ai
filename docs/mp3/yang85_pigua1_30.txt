@@ -1,0 +1,39 @@
+# Timeline for yang85_pigua1.mp3
+# Format: filename  start_time
+
+85_01.wav  0.0
+85_02.wav  6.0
+85_03_lrtail.wav  9.1
+85_04_sw.wav  21.1
+85_05_raise.wav  26.0
+85_06_white.wav  29.0
+85_07_knee.wav  32.6
+85_08_pipa.wav  37.4
+85_09_knee1.wav  41.1
+85_09_knee2.wav  45.9
+85_09_knee3.wav  50.7
+85_10_pipa.wav  55.6
+85_11_knee.wav  59.2
+85_12_banlan.wav  64.0
+85_13_aclose.wav  71.3
+85_14_cross.wav  74.9
+85_15_back2m.wav  77.9
+85_16_fistunder.wav  88.8
+85_17_monkey1.wav  93.0
+85_17_monkey2.wav  97.2
+85_17_monkey3.wav  101.5
+85_18_fly.wav  105.7
+85_19_raise.wav  109.9
+85_20_white.wav  113.0
+85_21_knee.wav  116.6
+85_22_needle.wav  121.4
+85_23_fan.wav  125.6
+85_24_turnpunch.wav  129.9
+85_25_banlan.wav  134.7
+85_26_rtail.wav  141.9
+85_27_sw.wav  154.0
+85_28_wave1.wav  158.9
+85_28_wave2.wav  163.1
+85_28_wave3.wav  167.3
+85_29_sw.wav  171.5
+85_30_pathorse.wav  176.4

@@ -6,8 +6,10 @@ __pycache__/
 *.pyc
 
 # Generated audio output (large binary files)
-*.mp3
 *.wav
+
+# Environment / secrets
+.env
 
 # IDE / editor
 .vscode/

@@ -32,20 +32,44 @@ python -m venv .venv
 
 ### `.properties` file format
 
+**Unified format** (all-in-one, for simple use cases):
 ```properties
 input_dir=G:\path\to\wav\files
 output_dir=G:\path\to\output
-output_filename=yang85_pigua.mp3    # optional; defaults to <stem>.mp3
+output_filename=yang85_25min.mp3    # optional; defaults to <stem>.mp3
 bitrate=192k
-formlength=480                       # total form seconds
+formlength=1500                      # total form seconds
 # Tracklist: weighted posture entries
 85_01.wav=10                         # weight 10  (e.g. 无极势)
 85_02.wav=5                          # weight 5   (太极起势)
 85_03_lrtail.wav=20                  # weight 20  (揽雀尾)
 ```
 
-- **Config keys:** `input_dir`, `output_dir`, `output_filename` (opt), `bitrate`, `formlength`
+**Modular format** (control file + separate form definition):
+```properties
+# Control file: yang85pigua.properties
+input_dir=G:\path\to\wav\files
+output_dir=G:\path\to\output
+bitrate=192k
+form=yang85form.properties           # points to form definition file
+intro=pigua.mp3                      # optional intro MP3 (prepended)
+output_filename=yang85_pigua.mp3
+formlength=480                       # form duration (excludes intro)
+```
+
+```properties
+# Form definition file: yang85form.properties
+# Section 1
+85_01.wav=10
+85_02.wav=5
+85_03_lrtail.wav=20
+# ... more tracks
+```
+
+- **Config keys:** `input_dir`, `output_dir`, `output_filename` (opt), `bitrate`, `formlength`, `form` (opt), `intro` (opt)
 - **Track entries:** `<filename>.wav = <weight>` — relative timing unit
+- **`form=`** — path to separate form definition file (relative to control file)
+- **`intro=`** — path to intro MP3 file (prepended before form; not counted in formlength)
 - Start times are computed at runtime: each track's start = sum of preceding weights × formlength ÷ total_weight
 - Edge-TTS audio pipeline: `gen_mapping.py` → (edit `_mapping.properties`) → `gen_audio.py` → update `input_dir` → `wav_to_mp3.py`
 
@@ -53,8 +77,10 @@ formlength=480                       # total form seconds
 
 | File | Description |
 |---|---|
-| `yang85.properties` | Original form config (Confucius4 TTS) |
-| `yang85edgetts.properties` | Form config pointing to Edge-TTS audio |
+| `yang85.properties` | Original unified config (Confucius4 TTS) — all-in-one |
+| `yang85edgetts.properties` | Unified config pointing to Edge-TTS audio |
+| `yang85form.properties` | **Form definition** — track weights only (modular) |
+| `yang85pigua.properties` | **Control file** — uses `form=` + `intro=` (modular) |
 | `yang85_mapping.properties` | 105 filename → spoken Chinese text pairs |
 | `yang42.properties` | Older test/demo config |
 

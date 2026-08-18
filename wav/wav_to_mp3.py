@@ -1,8 +1,9 @@
 # wav_to_mp3.py — Convert WAV files to MP3 and assemble into a timed final MP3
 #
 # Reads a single .properties file (config + track timeline).
-# Usage: python wav_to_mp3.py yang42.properties
+# Usage: python wav_to_mp3.py yang42.properties [--force] [--cache-dir <path>]
 
+import argparse
 import os
 import re
 import shutil
@@ -26,7 +27,7 @@ from tqdm import tqdm
 # constants
 # ---------------------------------------------------------------------------
 
-CONFIG_KEYS = {"input_dir", "output_dir", "output_filename", "bitrate", "formlength"}
+CONFIG_KEYS = {"input_dir", "output_dir", "output_filename", "bitrate", "formlength", "form", "intro", "cache_dir"}
 BITRATE_RE = re.compile(r"^\d+k$")
 
 Track = namedtuple("Track", ["filename", "weight", "start_sec"])
@@ -37,7 +38,11 @@ Track = namedtuple("Track", ["filename", "weight", "start_sec"])
 
 
 def parse_properties(properties_path: Path) -> "tuple[dict, list[Track]]":
-    """Parse <name>.properties into (config dict, sorted list of Track)."""
+    """Parse <name>.properties into (config dict, sorted list of Track).
+    
+    If 'form' attribute is present, load track entries from the referenced
+    form file instead of the main properties file.
+    """
     if not properties_path.is_file():
         print(f"Error: file not found — {properties_path}")
         sys.exit(1)
@@ -46,6 +51,7 @@ def parse_properties(properties_path: Path) -> "tuple[dict, list[Track]]":
     tracks: list[Track] = []
     seen_filenames: set[str] = set()
 
+    # First pass: extract config keys only
     with open(properties_path, encoding="utf-8") as f:
         for lineno, raw in enumerate(f, 1):
             line = raw.strip()
@@ -68,7 +74,78 @@ def parse_properties(properties_path: Path) -> "tuple[dict, list[Track]]":
 
             if key in CONFIG_KEYS:
                 config[key] = val
-            else:
+
+    # Second pass: load tracks (either from main file or form file)
+    if "form" in config:
+        # Modular mode: load tracks from form file
+        form_path = properties_path.parent / config["form"]
+        if not form_path.is_file():
+            print(f"Error: form file not found — {form_path}")
+            sys.exit(1)
+        
+        with open(form_path, encoding="utf-8") as f:
+            for lineno, raw in enumerate(f, 1):
+                line = raw.strip()
+                
+                # skip blank lines and #-comments
+                if not line or line.startswith("#"):
+                    continue
+                
+                if "=" not in line:
+                    continue  # skip malformed lines in form file
+                
+                key, _, val = line.partition("=")
+                key = key.strip()
+                val = val.strip()
+                
+                # skip config keys (form file should ideally only have tracks,
+                # but we'll be tolerant and skip config keys if present)
+                if key in CONFIG_KEYS:
+                    continue
+                
+                # form file should only contain filename=weight pairs
+                try:
+                    weight = float(val)
+                except ValueError:
+                    continue  # skip non-numeric entries
+                
+                if weight < 0:
+                    print(
+                        f"Error: form file {form_path.name} line {lineno}: "
+                        f"negative weight for '{key}' — {weight}"
+                    )
+                    sys.exit(1)
+                
+                if key in seen_filenames:
+                    print(
+                        f"Error: form file {form_path.name}: "
+                        f"duplicate track filename '{key}' (line {lineno})"
+                    )
+                    sys.exit(1)
+                seen_filenames.add(key)
+                
+                tracks.append(Track(filename=key, weight=weight, start_sec=0.0))
+    else:
+        # Legacy mode: load tracks from main properties file
+        with open(properties_path, encoding="utf-8") as f:
+            for lineno, raw in enumerate(f, 1):
+                line = raw.strip()
+
+                # skip blank lines and #-comments
+                if not line or line.startswith("#"):
+                    continue
+
+                if "=" not in line:
+                    continue
+
+                key, _, val = line.partition("=")
+                key = key.strip()
+                val = val.strip()
+
+                # skip config keys
+                if key in CONFIG_KEYS:
+                    continue
+
                 try:
                     weight = float(val)
                 except ValueError:
@@ -201,29 +278,56 @@ def validate_tracks_pre(tracks: list[Track], input_dir: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def convert_wav_to_mp3(wav_path: Path, temp_dir: Path, bitrate: str) -> Path:
+def convert_wav_to_mp3(wav_path: Path, cache_dir: Path, bitrate: str) -> Path:
     """Convert a single WAV to MP3. Return path to the output MP3."""
     audio = AudioSegment.from_wav(wav_path)
-    mp3_path = temp_dir / (wav_path.stem + ".mp3")
+    mp3_path = cache_dir / (wav_path.stem + ".mp3")
     audio.export(mp3_path, format="mp3", bitrate=bitrate)
     return mp3_path
 
 
-def convert_all(
+def ensure_cache(
     tracks: list[Track],
     input_dir: Path,
-    temp_dir: Path,
+    cache_dir: Path,
     bitrate: str,
-) -> dict[str, float]:
-    """Convert every WAV in the tracklist. Return {filename: duration_sec}."""
-    durations: dict[str, float] = {}
-    for track in tqdm(tracks, desc="Converting to MP3", unit="file"):
+    force: bool,
+) -> None:
+    """Convert missing/stale WAVs to MP3 in cache_dir; reuse the rest.
+
+    A cached MP3 is considered fresh when it exists and its mtime is >= the
+    source WAV's mtime. `force=True` reconverts everything.
+    """
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    to_convert: list[Track] = []
+    reused = 0
+
+    for track in tracks:
         wav_path = input_dir / track.filename
-        mp3_path = convert_wav_to_mp3(wav_path, temp_dir, bitrate)
-        # record the actual duration (in seconds)
-        converted = AudioSegment.from_mp3(mp3_path)
-        durations[track.filename] = len(converted) / 1000.0
-    return durations
+        mp3_path = cache_dir / (Path(track.filename).stem + ".mp3")
+
+        if force:
+            to_convert.append(track)
+            continue
+
+        if not mp3_path.is_file():
+            to_convert.append(track)
+            continue
+
+        if wav_path.stat().st_mtime > mp3_path.stat().st_mtime:
+            to_convert.append(track)
+        else:
+            reused += 1
+
+    for track in tqdm(to_convert, desc="Converting to MP3", unit="file"):
+        wav_path = input_dir / track.filename
+        convert_wav_to_mp3(wav_path, cache_dir, bitrate)
+
+    print(
+        f"MP3 cache: {len(to_convert)} converted, {reused} reused "
+        f"({cache_dir})"
+    )
 
 # ---------------------------------------------------------------------------
 # overlap check (post-conversion)
@@ -256,7 +360,7 @@ def validate_overlap(
 
 def build_timeline(
     tracks: list[Track],
-    temp_dir: Path,
+    cache_dir: Path,
 ) -> AudioSegment:
     """Build the final assembled AudioSegment with silence between clips."""
     assembled = AudioSegment.empty()
@@ -265,7 +369,7 @@ def build_timeline(
     # load all MP3s first to get durations
     audio_map: dict[str, AudioSegment] = {}
     for track in tracks:
-        mp3_path = temp_dir / (Path(track.filename).stem + ".mp3")
+        mp3_path = cache_dir / (Path(track.filename).stem + ".mp3")
         seg = AudioSegment.from_mp3(mp3_path)
         audio_map[track.filename] = seg
         durations[track.filename] = len(seg) / 1000.0
@@ -307,16 +411,6 @@ def export_final(
     """Export the assembled AudioSegment to an MP3 file."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
     audio.export(output_path, format="mp3", bitrate=bitrate)
-
-# ---------------------------------------------------------------------------
-# temp directory management
-# ---------------------------------------------------------------------------
-
-
-def cleanup_temp_dir(temp_dir: Path) -> None:
-    """Delete the temp directory and all its contents."""
-    if temp_dir.exists():
-        shutil.rmtree(temp_dir)
 
 # ---------------------------------------------------------------------------
 # summary
@@ -380,14 +474,28 @@ def write_timeline_txt(
 
 
 def main() -> None:
-    if len(sys.argv) != 2:
-        print("Usage: python wav_to_mp3.py <name>.properties")
-        print("Example: python wav_to_mp3.py yang42.properties")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(
+        description="Assemble WAV clips into a timed MP3"
+    )
+    parser.add_argument(
+        "properties_file",
+        help="Path to the control .properties file",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Ignore the MP3 cache and reconvert all WAV files",
+    )
+    parser.add_argument(
+        "--cache-dir",
+        default=None,
+        help="Override the MP3 cache directory (default: <input_dir>/mp3cache)",
+    )
+    args = parser.parse_args()
 
-    properties_path = Path(sys.argv[1])
+    properties_path = Path(args.properties_file)
 
-    # 1. parse the unified .properties file
+    # 1. parse the control .properties file
     config, tracks = parse_properties(properties_path)
 
     input_dir = Path(config["input_dir"])
@@ -396,7 +504,14 @@ def main() -> None:
     formlength = float(config["formlength"])
     output_name = config["output_name"]
     output_path = output_dir / output_name
-    temp_dir = output_dir / "temp"
+
+    # resolve cache dir: CLI flag > config key > default
+    if args.cache_dir:
+        cache_dir = Path(args.cache_dir)
+    elif "cache_dir" in config:
+        cache_dir = Path(config["cache_dir"])
+    else:
+        cache_dir = input_dir / "mp3cache"
 
     # 2. validate environment
     validate_ffmpeg()
@@ -404,31 +519,37 @@ def main() -> None:
     # 3. pre-conversion track validation (file existence)
     validate_tracks_pre(tracks, input_dir)
 
-    # 4. create temp directory
-    temp_dir.mkdir(parents=True, exist_ok=True)
+    # 4. ensure every WAV has a fresh MP3 in the cache (converts only what's
+    #    missing or stale — a one-time cost, reused across merges)
+    ensure_cache(tracks, input_dir, cache_dir, bitrate, args.force)
 
-    durations: dict[str, float] = {}
-    try:
-        # 5. convert all WAV → MP3
-        durations = convert_all(tracks, input_dir, temp_dir, bitrate)
+    # 5. build timeline & validate overlap
+    assembled, durations = build_timeline(tracks, cache_dir)
+    validate_overlap(tracks, durations)
 
-        # 6. overlap validation (requires durations)
-        validate_overlap(tracks, durations)
+    # 6. prepend intro MP3 if specified
+    if "intro" in config:
+        intro_path = properties_path.parent / config["intro"]
+        if not intro_path.is_file():
+            print(f"Error: intro file not found — {intro_path}")
+            sys.exit(1)
 
-        # 7. build timeline & export
-        assembled, durations_from_build = build_timeline(tracks, temp_dir)
-        durations.update(durations_from_build)
-        export_final(assembled, output_path, bitrate)
+        print(f"\nPrepending intro: {intro_path.name}")
+        intro_audio = AudioSegment.from_mp3(intro_path)
+        intro_duration = len(intro_audio) / 1000.0
+        print(f"  Intro duration: {intro_duration:.1f}s")
 
-        # 8. print summary
-        print_summary(tracks, durations, output_path, formlength)
+        # prepend intro to assembled timeline
+        assembled = intro_audio + assembled
 
-        # 9. write timeline txt alongside the MP3
-        write_timeline_txt(tracks, durations, output_path)
+    # 7. export final MP3
+    export_final(assembled, output_path, bitrate)
 
-    finally:
-        # 10. always clean up temp directory
-        cleanup_temp_dir(temp_dir)
+    # 8. print summary
+    print_summary(tracks, durations, output_path, formlength)
+
+    # 9. write timeline txt alongside the MP3
+    write_timeline_txt(tracks, durations, output_path)
 
 
 if __name__ == "__main__":
