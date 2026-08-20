@@ -422,11 +422,17 @@ def print_summary(
     durations: dict[str, float],
     output_path: Path,
     formlength: float,
+    offset: float = 0.0,
 ) -> None:
-    """Print a formatted summary of the assembled timeline."""
+    """Print a formatted summary of the assembled timeline.
+
+    *offset* is the intro duration to add to every track's start time
+    so the displayed times match the actual MP3 timeline.
+    """
     print("\nTimeline assembled:")
     total_weight = sum(t.weight for t in tracks)
     for track in tracks:
+        start = track.start_sec + offset
         duration = durations[track.filename]
         if track == tracks[0]:
             silence = track.start_sec
@@ -436,8 +442,9 @@ def print_summary(
                 track.start_sec
                 - (prev.start_sec + durations[prev.filename])
             )
+        start_str = f"{int(start)//60}:{int(start)%60:02d}"
         print(
-            f"  [{track.start_sec:7.1f}s]  "
+            f"  [{start_str}]  "
             f"{track.filename:<24}"
             f"(w:{track.weight:4.0f}  "
             f"clip:{duration:4.1f}s  "
@@ -445,8 +452,9 @@ def print_summary(
         )
 
     last = tracks[-1]
-    total = last.start_sec + durations[last.filename]
-    print(f"\nTotal duration: {total:.1f}s")
+    total = last.start_sec + durations[last.filename] + offset
+    total_str = f"{int(total)//60}:{int(total)%60:02d}"
+    print(f"\nTotal duration: {total:.1f}s  ({total_str})")
     print(f"Total weight: {total_weight:.0f}")
     print(f"Form length (target): {formlength:.0f}s")
     print(f"Output: {output_path}")
@@ -459,14 +467,21 @@ def write_timeline_txt(
     tracks: list[Track],
     durations: dict[str, float],
     output_path: Path,
+    offset: float = 0.0,
 ) -> None:
-    """Write a simple timeline index file next to the MP3."""
+    """Write a simple timeline index file next to the MP3.
+
+    *offset* is the intro duration so the file lists the actual time
+    in the final MP3 rather than the form-relative start time.
+    """
     txt_path = output_path.with_suffix(".txt")
     with open(txt_path, "w", encoding="utf-8") as f:
         f.write(f"# Timeline for {output_path.name}\n")
         f.write(f"# Format: filename  start_time\n\n")
         for track in tracks:
-            f.write(f"{track.filename}  {track.start_sec:.1f}\n")
+            actual_start = track.start_sec + offset
+            ts = f"{int(actual_start)//60}:{int(actual_start)%60:02d}"
+            f.write(f"{track.filename}  {ts}\n")
     print(f"Timeline: {txt_path}")
 # ---------------------------------------------------------------------------
 # main
@@ -528,6 +543,7 @@ def main() -> None:
     validate_overlap(tracks, durations)
 
     # 6. prepend intro MP3 if specified
+    intro_duration = 0.0
     if "intro" in config:
         intro_path = properties_path.parent / config["intro"]
         if not intro_path.is_file():
@@ -546,10 +562,10 @@ def main() -> None:
     export_final(assembled, output_path, bitrate)
 
     # 8. print summary
-    print_summary(tracks, durations, output_path, formlength)
+    print_summary(tracks, durations, output_path, formlength, offset=intro_duration)
 
     # 9. write timeline txt alongside the MP3
-    write_timeline_txt(tracks, durations, output_path)
+    write_timeline_txt(tracks, durations, output_path, offset=intro_duration)
 
 
 if __name__ == "__main__":

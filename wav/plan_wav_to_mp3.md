@@ -137,9 +137,9 @@ No per-run temp directory; nothing is deleted after a run.
 
 - Final MP3 written to `output_dir/<output_filename>`.
 - Companion timeline `.txt` written next to it (filename → start time).
-  Start times are **form-relative**: the intro, if present, is not offset
-  into these values — the intro occupies the audio before `0.0s` of the form
-  timeline.
+  Start times are in `mm:ss` format (truncated seconds) to match audio player
+  displays, and are offset by the intro duration when one is present, so the
+  `.txt` file reflects the actual position in the final MP3.
 
 ## Error handling
 
