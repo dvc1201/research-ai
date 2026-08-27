@@ -1,6 +1,6 @@
 # Plan: `wav_to_mp3.py` — MP3 assembly & timeline merge
 
-**Date:** 2026-08-14
+**Date:** 2026-08-27
 **Status:** Active
 **Platform:** Windows only
 **Working directory:** `c:\work\github\research-ai\wav\`
@@ -85,7 +85,7 @@ formlength=480                      # form seconds, EXCLUDES intro
 # Section 1
 85_01.wav=10
 85_02.wav=5
-85_03_lrtail.wav=20
+85_03_lrtail.wav=18
 ```
 
 - Only `wav_filename=weight` pairs (weight is a relative timing unit).

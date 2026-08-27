@@ -1,12 +1,14 @@
 # research-ai
 
-Research on AI topics — currently focused on **WAV → MP3 timeline assembly** for martial arts audio companions.
+Research on AI topics — currently focused on **audio timeline assembly** for
+taiji practice guides (Yang-style 85 form).
 
 ---
 
 ## `wav/` — Audio Timeline Merger
 
-A Python toolbox for converting WAV posture-name clips into a single timed MP3, designed for taiji practice audio guides (Yang-style 85 form).
+A Python toolbox for generating spoken posture-name MP3s and merging them
+into a single timed practice audio.
 
 ### Pipeline
 
@@ -14,12 +16,8 @@ Two scripts, three hand-authored input files:
 
 | Stage | Tool | Input (manual) | Output |
 |---|---|---|---|
-| 1. Synthesis | `gen_audio.py` | `*_mapping.properties` (filename=spoken text) | WAV files (`edgetts/`) |
-| 2. Assembly | `wav_to_mp3.py` | control `*.properties` + form `*form*.properties` | final MP3 + timeline `.txt` |
-
-- `*_mapping.properties` — `wav_filename=spoken Chinese text`, hand-edited before synthesis
-- `*form*.properties` — `wav_filename=weight` (form definition)
-- control `*.properties` — paths, `form=`, `intro=`, `formlength=`, `output_filename=`
+| 1. Synthesis | `gen_audio.py` | control `.tts` (method, paths, params) + `*_mapping.properties` (filename=spoken text) | MP3 speech files |
+| 2. Assembly | `gen_form.py` | control `*.properties` (paths, `form=`, `intro=`, `formlength=`) + `*form*.properties` (filename=weight) | merged MP3 + timeline `.txt` |
 
 ### Quickstart
 
@@ -30,93 +28,78 @@ winget install Gyan.FFmpeg
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 
-# Build an MP3 (full form, pigua speed, with intro)
-.\.venv\Scripts\python.exe wav_to_mp3.py yang85pigua.properties
+# Generate the posture MP3s
+.\.venv\Scripts\python.exe gen_audio.py yang85_edge.tts
+
+# Merge them into a practice MP3 (full form, pigua speed, with intro)
+.\.venv\Scripts\python.exe gen_form.py yang85pigua.properties
 ```
 
 ### Scripts
 
 | Script | Purpose |
 |---|---|
-| `gen_audio.py` | Reads `*_mapping.properties`, calls Edge-TTS to synthesize clean Mandarin WAV files |
-| `wav_to_mp3.py` | Reads a control `.properties` (config + `form=`/`intro=`), converts WAV → MP3 (cached), assembles with silence gaps, exports MP3 + timeline `.txt` |
+| `gen_audio.py` | Reads a `.tts` control file, dispatches to a pluggable TTS generator (e.g. Edge-TTS), and produces one MP3 per mapping entry |
+| `gen_form.py` | Reads a control `.properties`, loads the referenced MP3 files, assembles them into a timed MP3 with silence gaps, exports the merged MP3 + timeline `.txt` |
 
-### `.properties` file format
-
-**Unified format** (all-in-one, for simple use cases):
-```properties
-input_dir=G:\path\to\wav\files
-output_dir=G:\path\to\output
-output_filename=yang85_25min.mp3    # optional; defaults to <stem>.mp3
-bitrate=192k
-formlength=1500                      # total form seconds
-# Tracklist: weighted posture entries
-85_01.wav=10                         # weight 10  (e.g. 无极势)
-85_02.wav=5                          # weight 5   (太极起势)
-85_03_lrtail.wav=20                  # weight 20  (揽雀尾)
-```
-
-**Modular format** (control file + separate form definition):
-```properties
-# Control file: yang85pigua.properties
-input_dir=G:\path\to\wav\files
-output_dir=G:\path\to\output
-bitrate=192k
-form=yang85form.properties           # points to form definition file
-intro=pigua.mp3                      # optional intro MP3 (prepended)
-output_filename=yang85_pigua.mp3
-formlength=480                       # form duration (excludes intro)
-```
+### Generation control file (`.tts`, properties format)
 
 ```properties
-# Form definition file: yang85form.properties
-# Section 1
-85_01.wav=10
-85_02.wav=5
-85_03_lrtail.wav=20
-# ... more tracks
+# yang85_edge.tts
+tts_class=EdgeTTS
+mapping_file=yang85_mapping.properties
+output_dir=G:\path\to\edgetts
+tts.voice=zh-CN-YunxiNeural
+tts.rate=-10%
 ```
 
-- **Config keys:** `input_dir`, `output_dir`, `output_filename` (opt), `bitrate`, `formlength`, `form` (opt), `intro` (opt), `cache_dir` (opt)
-- **Track entries:** `<filename>.wav = <weight>` — relative timing unit
-- **`form=`** — path to separate form definition file (relative to control file)
-- **`intro=`** — path to intro MP3 file (prepended before form; not counted in formlength)
-- Start times are computed at runtime: each track's start = sum of preceding weights × formlength ÷ total_weight
-- Edge-TTS audio pipeline: hand-edit `*_mapping.properties` → `gen_audio.py` (WAVs) → hand-edit control + form files → `wav_to_mp3.py` (MP3)
+| Key | Meaning |
+|---|---|
+| `tts_class` | Generator class (e.g. `EdgeTTS`) |
+| `mapping_file` | Path to the mapping file (relative to CWD) |
+| `output_dir` | Output directory for the MP3 speech files |
 
-### MP3 conversion cache
+All other keys are method-specific and interpreted by the generator. New
+generators are added by implementing a subclass in the `generators/` package
+and registering it in the builder.
 
-WAV → MP3 conversion is a **one-time** action. Converted MP3s are cached in
-`<input_dir>/mp3cache/` and reused by every subsequent merge, so building
-multiple practice parts costs almost nothing after the first run.
+### Assembly control file (`.properties`)
 
-```powershell
-.\.venv\Scripts\python.exe wav_to_mp3.py yang85pigua.properties           # cold: converts all
-.\.venv\Scripts\python.exe wav_to_mp3.py yang85pigua1.properties          # warm: 0 converted
-.\.venv\Scripts\python.exe wav_to_mp3.py yang85pigua.properties --force   # ignore cache
+```properties
+# yang85pigua.properties
+input_dir=G:\path\to\edgetts
+output_dir=G:\path\to\mp3
+form=yang85form.properties           # form definition, relative to CWD
+intro=pigua.mp3                      # optional intro, relative to CWD
+output_filename=yang85_pigua.mp3     # mandatory output name
+formlength=480                       # target form seconds (intro excluded)
 ```
+
+| Key | Required | Meaning |
+|---|---|---|
+| `input_dir` | Yes | Directory containing the source MP3 files |
+| `output_dir` | Yes | Directory for the merged output MP3 |
+| `form` | Yes | Form definition file (`.mp3` keys, `filename=weight`) |
+| `output_filename` | Yes | Output MP3 filename |
+| `formlength` | Yes | Target form duration in seconds (intro excluded) |
+| `intro` | No | Intro MP3 prepended before the form |
+
+- Paths are resolved relative to the current working directory.
+- No bitrate key — the final export is always 192 kbps.
+- `mm:ss` timeline `.txt` is written alongside the MP3, with start times
+  offset by the intro duration.
+
+### Bitrate design
+
+Source MP3s keep whatever bitrate the generator produces (Edge-TTS: ~48 kbps
+mono speech). The assembly stage (`gen_form.py`) normalizes the merged output
+to 192 kbps at export time — no bitrate handling is needed in the synthesis
+stage.
 
 ### Yang 85-form files
 
-| File | Description |
-|---|---|
-| `yang85_mapping.properties` | 105 filename → spoken Chinese text pairs (manual, stage 1 input) |
-| `yang85form.properties` | Full form definition — 105 `filename=weight` entries |
-| `yang85form1.properties` | Form subset — postures 1–30 |
-| `yang85form2.properties` | Form subset — postures 29–56 |
-| `yang85form3.properties` | Form subset — postures 56–85 |
-| `yang85pigua.properties` | Control — full form, pigua speed (480s) |
-| `yang85pigua1.properties` | Control — part 1, pigua speed (180s) |
-| `yang85pigua2.properties` | Control — part 2, pigua speed (180s) |
-| `yang85pigua3.properties` | Control — part 3, pigua speed (180s) |
-| `pigua.mp3` | Intro audio (prepended via `intro=`) |
-| `yang85.properties` | Legacy unified config (all-in-one) |
-| `yang42.properties` | Older test/demo config (not valid input for current script) |
-
-### Practice parts (`docs/`)
-
-Generated practice MP3s (full form + parts at pigua speed) and their timeline
-indexes live in `docs/mp3/`. See `docs/README.md` for the overview table.
+Form definitions and assembly control files live in [`forms/`](forms/README.md).
+See that directory for the full file listing and per-form documentation.
 
 ### Environment
 

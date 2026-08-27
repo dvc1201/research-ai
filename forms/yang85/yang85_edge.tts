@@ -1,0 +1,5 @@
+tts_class=EdgeTTS
+mapping_file=yang85_mapping.properties
+output_dir=G:\My Drive\Peter\Taichi\yang85\edgetts
+tts.voice=zh-CN-YunxiNeural
+tts.rate=-10%
